@@ -1,0 +1,9 @@
+# Local release/extraction artifacts
+mine-cheater-v*.zip
+mine-cheater-v*/
+
+# Common editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
