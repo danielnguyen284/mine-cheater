@@ -17,6 +17,7 @@
       "js": [
         "src/solver.js",
         "src/adapter.js",
+        "src/planner.js",
         "src/content.js"
       ],
       "run_at": "document_idle"

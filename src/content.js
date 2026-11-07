@@ -6,14 +6,15 @@
 
   const Solver = globalThis.MineCheaterSolver;
   const Adapter = globalThis.MineCheaterAdapter;
+  const Planner = globalThis.MineCheaterPlanner;
 
-  if (!Solver || !Adapter) {
-    console.error('[Mine Cheater] Solver or site adapter did not load.');
+  if (!Solver || !Adapter || !Planner) {
+    console.error('[Mine Cheater] Solver, planner or site adapter did not load.');
     return;
   }
 
   const SETTINGS_KEY = 'mineCheaterSettings';
-  const DEFAULT_SETTINGS = { hints: false, collapsed: false };
+  const DEFAULT_SETTINGS = { hints: false, style: 'efficient', collapsed: false };
   const SOLVER_OPTIONS = Object.freeze({
     maxCspMs: 320,
     maxCspNodes: 300000,
@@ -39,6 +40,7 @@
       const saved = result?.[SETTINGS_KEY] || {};
       return {
         hints: saved.hints === true,
+        style: saved.style === 'nf' ? 'nf' : 'efficient',
         collapsed: saved.collapsed === true,
       };
     } catch {
@@ -71,6 +73,10 @@
           --mc-green-2: #24ad68;
           --mc-amber: #f6c65b;
           --mc-red: #ff776d;
+          --mk-open: #1fd16f;
+          --mk-flag: #ff4d4d;
+          --mk-chord: #3b8bff;
+          --mk-unflag: #ffb020;
           font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
@@ -217,6 +223,42 @@
         .stat-value { display: block; color: #f5fff8; font: 720 15px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
         .stat-label { display: block; margin-top: 4px; color: #789083; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 
+        .style-switch {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 4px;
+          margin-bottom: 10px;
+          padding: 3px;
+          background: rgba(3, 10, 7, .3);
+          border: 1px solid rgba(255,255,255,.045);
+          border-radius: 10px;
+        }
+
+        .style-switch button {
+          min-height: 28px;
+          color: var(--mc-muted);
+          background: transparent;
+          border: 0;
+          border-radius: 8px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .style-switch button.active { color: #092416; background: var(--mc-green); }
+
+        .legend {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px 12px;
+          margin-bottom: 12px;
+          color: var(--mc-muted);
+          font-size: 10px;
+        }
+
+        .legend span { display: inline-flex; align-items: center; gap: 5px; }
+        .swatch { width: 11px; height: 11px; border: 2px solid; border-radius: 3px; }
+
         button { font-family: inherit; }
 
         .primary {
@@ -247,20 +289,24 @@
         }
         .warning b { color: var(--mc-amber); font-weight: 700; }
 
-        .hint {
+        .cell-mark {
           position: fixed;
           z-index: 2147483645;
           display: none;
           pointer-events: none;
-          border: 3px solid var(--mc-green);
-          border-radius: 6px;
-          box-shadow: 0 0 0 2px rgba(9,36,22,.55), 0 0 14px rgba(78,225,139,.75);
-          animation: hint-pulse 1s ease-in-out infinite;
+          border: 2px solid;
+          border-radius: 4px;
         }
-        .hint.visible { display: block; }
-        .hint.unflag { border-color: var(--mc-amber); box-shadow: 0 0 0 2px rgba(40,28,4,.55), 0 0 14px rgba(246,198,91,.75); }
+        .cell-mark.visible { display: block; }
 
-        @keyframes hint-pulse {
+        .open { border-color: var(--mk-open); background: rgba(31, 209, 111, .3); }
+        .flag { border-color: var(--mk-flag); background: rgba(255, 77, 77, .3); }
+        .chord { border-color: var(--mk-chord); background: rgba(59, 139, 255, .3); }
+        .unflag { border-color: var(--mk-unflag); background: rgba(255, 176, 32, .3); }
+        .via { border: 1px dashed var(--mk-open); background: rgba(31, 209, 111, .1); }
+        .cell-mark.start { border-width: 3px; box-shadow: 0 0 12px rgba(31, 209, 111, .8); animation: mark-pulse 1s ease-in-out infinite; }
+
+        @keyframes mark-pulse {
           50% { opacity: .55; }
         }
 
@@ -269,7 +315,7 @@
         }
       </style>
 
-      <div class="hint" aria-hidden="true"></div>
+      <div class="marks" aria-hidden="true"></div>
 
       <section class="panel" aria-label="Mine Cheater controls">
         <header class="header">
@@ -295,6 +341,19 @@
             <div class="stat"><span class="stat-value safe">0</span><span class="stat-label">ô an toàn</span></div>
             <div class="stat"><span class="stat-value opened">0</span><span class="stat-label">đã mở</span></div>
             <div class="stat"><span class="stat-value mines">0</span><span class="stat-label">mìn suy ra</span></div>
+          </div>
+
+          <div class="style-switch" role="group" aria-label="Kiểu chơi">
+            <button type="button" data-style="efficient">Hiệu suất</button>
+            <button type="button" data-style="nf">NF (không cờ)</button>
+          </div>
+
+          <div class="legend" aria-label="Chú thích màu">
+            <span><i class="swatch open"></i>mở</span>
+            <span><i class="swatch flag"></i>cắm cờ</span>
+            <span><i class="swatch chord"></i>chord</span>
+            <span><i class="swatch via"></i>chord sẽ mở</span>
+            <span><i class="swatch unflag"></i>gỡ cờ</span>
           </div>
 
           <button class="primary" type="button">BẬT GỢI Ý</button>
@@ -323,8 +382,10 @@
       this.safeNode = this.shadow.querySelector('.safe');
       this.openedNode = this.shadow.querySelector('.opened');
       this.minesNode = this.shadow.querySelector('.mines');
-      this.hintNode = this.shadow.querySelector('.hint');
-      this.hintTarget = null;
+      this.marksNode = this.shadow.querySelector('.marks');
+      this.markNodes = [];
+      this.markTargets = [];
+      this.styleButtons = Array.from(this.shadow.querySelectorAll('.style-switch button'));
 
       this.panel.classList.toggle('collapsed', Boolean(settings.collapsed));
 
@@ -334,12 +395,24 @@
         saveSettings(settings);
       });
 
-      const reposition = () => this.placeHint();
+      const reposition = () => this.placeMarks();
       window.addEventListener('scroll', reposition, { capture: true, passive: true });
       window.addEventListener('resize', reposition, { passive: true });
     }
 
     onToggle(handler) { this.primary.addEventListener('click', handler); }
+
+    onStyle(handler) {
+      for (const button of this.styleButtons) {
+        button.addEventListener('click', () => handler(button.dataset.style));
+      }
+    }
+
+    setStyle(style) {
+      for (const button of this.styleButtons) {
+        button.classList.toggle('active', button.dataset.style === style);
+      }
+    }
 
     setEnabled(enabled) {
       this.primary.classList.toggle('on', enabled);
@@ -363,31 +436,41 @@
       if (mines !== undefined) this.minesNode.textContent = String(mines);
     }
 
-    showHint(element, kind) {
-      this.hintTarget = element;
-      this.hintNode.classList.toggle('unflag', kind === 'unflag');
-      this.placeHint();
-    }
-
-    hideHint() {
-      this.hintTarget = null;
-      this.hintNode.classList.remove('visible');
-    }
-
-    placeHint() {
-      const target = this.hintTarget;
-      const rect = target?.isConnected ? target.getBoundingClientRect() : null;
-      if (!rect || !rect.width || !rect.height) {
-        this.hintNode.classList.remove('visible');
-        return;
+    /** Outline each { element, kind } pair; nodes are pooled across refreshes. */
+    showMarks(marks) {
+      while (this.markNodes.length < marks.length) {
+        const node = document.createElement('div');
+        this.marksNode.append(node);
+        this.markNodes.push(node);
       }
-      Object.assign(this.hintNode.style, {
-        left: `${rect.left - 2}px`,
-        top: `${rect.top - 2}px`,
-        width: `${rect.width + 4}px`,
-        height: `${rect.height + 4}px`,
+      this.markNodes.forEach((node, index) => {
+        node.className = marks[index] ? `cell-mark ${marks[index].kind}` : 'cell-mark';
       });
-      this.hintNode.classList.add('visible');
+      this.markTargets = marks.map((mark) => mark.element);
+      this.placeMarks();
+    }
+
+    hideMarks() {
+      this.showMarks([]);
+    }
+
+    placeMarks() {
+      // Read every rect before writing any style to avoid layout thrashing.
+      const rects = this.markTargets.map((element) => (element?.isConnected ? element.getBoundingClientRect() : null));
+      rects.forEach((rect, index) => {
+        const node = this.markNodes[index];
+        if (!rect || !rect.width || !rect.height) {
+          node.classList.remove('visible');
+          return;
+        }
+        Object.assign(node.style, {
+          left: `${rect.left}px`,
+          top: `${rect.top}px`,
+          width: `${rect.width}px`,
+          height: `${rect.height}px`,
+        });
+        node.classList.add('visible');
+      });
     }
   }
 
@@ -395,12 +478,6 @@
     if (typeof cell === 'string') return cell;
     if (cell && Number.isFinite(cell.x) && Number.isFinite(cell.y)) return `${cell.x},${cell.y}`;
     return null;
-  }
-
-  function findSnapshotCell(snapshot, move) {
-    const key = cellKey(move);
-    if (!key) return null;
-    return snapshot.cells.find((cell) => cellKey(cell) === key || cell.key === key) || null;
   }
 
   function snapshotFingerprint(snapshot) {
@@ -420,23 +497,6 @@
       || document.querySelector(`#cell_${cell.x}_${cell.y}`);
   }
 
-  function distance(left, right) {
-    return Math.max(Math.abs(left.x - right.x), Math.abs(left.y - right.y));
-  }
-
-  /**
-   * Prefer covered cells (a flagged safe cell only needs its flag removed) and
-   * stay close to the previous hint so the mouse does not jump across the board.
-   */
-  function pickNextCell(snapshot, safeMoves, previous) {
-    const cells = safeMoves.map((move) => findSnapshotCell(snapshot, move)).filter(Boolean);
-    const covered = cells.filter((cell) => cell.state === 'covered');
-    const pool = covered.length ? covered : cells;
-    if (!pool.length) return null;
-    if (!previous) return pool[0];
-    return pool.reduce((best, cell) => (distance(cell, previous) < distance(best, previous) ? cell : best));
-  }
-
   class HintController {
     constructor(panel, settings) {
       this.panel = panel;
@@ -445,10 +505,12 @@
       this.pointerDown = false;
       this.cachedFingerprint = null;
       this.cachedResult = null;
-      this.lastHint = null;
+      this.cachedPlan = null;
 
       panel.setEnabled(settings.hints);
+      panel.setStyle(settings.style);
       panel.onToggle(() => this.toggle());
+      panel.onStyle((style) => this.setStyle(style));
       document.addEventListener('keydown', (event) => {
         const target = event.target;
         const isEditing = target instanceof HTMLElement
@@ -461,11 +523,14 @@
 
       // While a button is held the site may draw the pressed cell as opened;
       // reading that frame would feed the solver a clue that does not exist.
-      document.addEventListener('mousedown', () => { this.pointerDown = true; }, true);
-      document.addEventListener('mouseup', () => {
+      // Pointer events cover chords too: pointerup fires once every button is up.
+      const release = () => {
         this.pointerDown = false;
         this.scheduleRefresh();
-      }, true);
+      };
+      document.addEventListener('pointerdown', () => { this.pointerDown = true; }, true);
+      document.addEventListener('pointerup', release, true);
+      document.addEventListener('pointercancel', release, true);
       window.addEventListener('blur', () => { this.pointerDown = false; });
 
       this.observePage();
@@ -475,6 +540,14 @@
     toggle() {
       this.settings.hints = !this.settings.hints;
       this.panel.setEnabled(this.settings.hints);
+      saveSettings(this.settings);
+      this.refresh();
+    }
+
+    setStyle(style) {
+      if (style === this.settings.style) return;
+      this.settings.style = style;
+      this.panel.setStyle(style);
       saveSettings(this.settings);
       this.refresh();
     }
@@ -498,23 +571,24 @@
     }
 
     idle(mode, message, kind) {
-      this.panel.hideHint();
+      this.panel.hideMarks();
       this.panel.setStats({ safe: 0, mines: 0 });
       this.panel.setMode(mode, kind);
       this.panel.setStatus(message, kind);
     }
 
-    hint(element, cell, kind) {
-      this.lastHint = { x: cell.x, y: cell.y };
-      this.panel.showHint(element, kind);
-      this.panel.setMode('No Guessing', 'running');
-      if (kind === 'start') {
-        this.panel.setStatus(`Bấm ô bắt đầu (${cell.x}, ${cell.y}) mà game đã đánh dấu.`, 'running');
-      } else if (kind === 'unflag') {
-        this.panel.setStatus(`Ô (${cell.x}, ${cell.y}) đang cắm cờ nhưng an toàn: gỡ cờ rồi mở.`, 'warning');
-      } else {
-        this.panel.setStatus(`Mở ô (${cell.x}, ${cell.y}): chắc chắn an toàn.`, 'running');
+    /** Solve once per board state; the site's clock ticks re-run refresh every second. */
+    analyze(snapshot) {
+      const fingerprint = snapshotFingerprint(snapshot);
+      if (fingerprint !== this.cachedFingerprint) {
+        this.cachedResult = Solver.analyze(snapshot, SOLVER_OPTIONS);
+        this.cachedPlan = null;
+        this.cachedFingerprint = fingerprint;
       }
+      if (!this.cachedPlan || this.cachedPlan.style !== this.settings.style) {
+        this.cachedPlan = Planner.plan(snapshot, this.cachedResult, { style: this.settings.style });
+      }
+      return { result: this.cachedResult, plan: this.cachedPlan };
     }
 
     refresh() {
@@ -548,7 +622,7 @@
         return;
       }
       if (!this.settings.hints) {
-        this.idle('No Guessing', 'Bấm BẬT GỢI Ý hoặc Alt+S để hiện ô an toàn tiếp theo.', 'ready');
+        this.idle('No Guessing', 'Bấm BẬT GỢI Ý hoặc Alt+S để hiện các ô an toàn.', 'ready');
         return;
       }
 
@@ -559,42 +633,63 @@
           this.idle('No Guessing', 'Đang chờ game đánh dấu ô mở đầu…', 'running');
           return;
         }
+        this.panel.showMarks([{ element, kind: 'open start' }]);
         this.panel.setStats({ safe: 1, mines: 0 });
-        this.hint(element, startCell, 'start');
+        this.panel.setMode('No Guessing', 'running');
+        this.panel.setStatus(`Bấm ô bắt đầu (${startCell.x}, ${startCell.y}) mà game đã đánh dấu.`, 'running');
         return;
       }
 
-      const fingerprint = snapshotFingerprint(snapshot);
-      if (fingerprint !== this.cachedFingerprint) {
-        try {
-          this.cachedResult = Solver.analyze(snapshot, SOLVER_OPTIONS);
-        } catch (error) {
-          this.cachedResult = null;
-          this.cachedFingerprint = null;
-          this.idle('Lỗi solver', `Solver gặp lỗi: ${error?.message || String(error)}`, 'error');
-          return;
-        }
-        this.cachedFingerprint = fingerprint;
+      let analysis;
+      try {
+        analysis = this.analyze(snapshot);
+      } catch (error) {
+        this.idle('Lỗi solver', `Solver gặp lỗi: ${error?.message || String(error)}`, 'error');
+        return;
       }
 
-      const result = this.cachedResult;
+      const { result, plan } = analysis;
       if (result.status === 'contradiction' || result.contradiction) {
         this.idle('No Guessing', 'Bàn đang mâu thuẫn hoặc skin không đọc được, nên chưa gợi ý.', 'error');
         return;
       }
 
-      const safeMoves = result.safe || result.safeCells || [];
-      const mineMoves = result.mines || result.mineCells || [];
-      const target = pickNextCell(snapshot, safeMoves, this.lastHint);
-      const element = target && boardElement(snapshot, target);
-      if (!element) {
+      const mineCount = (result.mines || []).length;
+      if (!plan.open.length && !plan.chord.length && !plan.unflag.length) {
         this.idle('No Guessing', 'Không có nước chắc chắn. Solver không đoán xác suất.', 'warning');
-        this.panel.setStats({ mines: mineMoves.length });
+        this.panel.setStats({ mines: mineCount });
         return;
       }
 
-      this.panel.setStats({ safe: safeMoves.length, mines: mineMoves.length });
-      this.hint(element, target, target.state === 'flagged' ? 'unflag' : 'open');
+      const cellsByKey = new Map(snapshot.cells.map((cell) => [cellKey(cell), cell]));
+      const marks = [];
+      const addMarks = (keys, kind) => {
+        for (const key of keys) {
+          const cell = cellsByKey.get(key);
+          const element = cell && boardElement(snapshot, cell);
+          if (element) marks.push({ element, kind });
+        }
+      };
+      addMarks(plan.open, 'open');
+      addMarks(plan.viaChord, 'via');
+      addMarks(plan.flag, 'flag');
+      addMarks(plan.chord, 'chord');
+      addMarks(plan.unflag, 'unflag');
+
+      this.panel.showMarks(marks);
+      this.panel.setStats({ safe: (result.safe || []).length, mines: mineCount });
+      this.panel.setMode('No Guessing', 'running');
+
+      let message;
+      if (plan.chord.length) {
+        message = `Cắm ${plan.flag.length} cờ, chord ${plan.chord.length} ô số, mở thêm ${plan.open.length} ô. Tiết kiệm ${plan.saved} click so với bấm chay.`;
+      } else if (plan.style === 'efficient') {
+        message = `${plan.open.length} ô an toàn đang sáng. Chưa có chord nào đáng cắm cờ.`;
+      } else {
+        message = `${plan.open.length} ô an toàn đang sáng. Bấm theo thứ tự nào cũng được.`;
+      }
+      if (plan.unflag.length) message += ` Gỡ ${plan.unflag.length} cờ cắm nhầm (viền vàng).`;
+      this.panel.setStatus(message, plan.unflag.length ? 'warning' : 'running');
     }
   }
 
