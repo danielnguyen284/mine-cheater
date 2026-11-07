@@ -1,11 +1,11 @@
 # Mine Cheater
 
-Chrome/Edge extension tự giải bàn **No Guessing** trên [minesweeper.online](https://minesweeper.online/) bằng đúng dữ liệu đang nhìn thấy trên bàn cờ.
+Chrome/Edge extension gợi ý ô an toàn tiếp theo trên bàn **No Guessing** của [minesweeper.online](https://minesweeper.online/), dựa trên đúng dữ liệu đang nhìn thấy trên bàn cờ. Người chơi tự bấm mọi ô.
 
-Extension không đọc đáp án ẩn và không chạm vào state nội bộ của game. Nó đọc các ô đã mở, dựng ràng buộc Minesweeper, suy luận ô chắc chắn an toàn bằng rule cơ bản, subset-difference và exact CSP, rồi mở từng ô một. Khi bàn còn nguyên, nó chỉ chọn ô `.start` do No Guessing chỉ định — tuyệt đối không tự click một ô ngẫu nhiên.
+Extension không đọc đáp án ẩn, không chạm vào state nội bộ của game và không gửi thao tác chuột nào vào trang. Nó đọc các ô đã mở, dựng ràng buộc Minesweeper, suy luận ô chắc chắn an toàn bằng rule cơ bản, subset-difference và exact CSP, rồi viền sáng một ô để bạn tự bấm. Khi bàn còn nguyên, nó chỉ trỏ vào ô `.start` do No Guessing chỉ định.
 
 > [!WARNING]
-> **Tài khoản dùng để test extension này đã bị minesweeper.online ban thật.** Luật của site ghi rõ solver, board analyser và chương trình tự click đều bị xem là gian lận; game master có toàn quyền xử lý theo quy định của họ. Extension không có cơ chế ẩn/né anti-cheat. Dùng nó đồng nghĩa với nguy cơ mất tài khoản; việc đăng xuất cũng không làm cách dùng này trở thành được phép hoặc an toàn. Không dùng trong PvP/Arena/giải đấu.
+> **Tài khoản dùng để test extension này đã bị minesweeper.online ban thật.** Luật của site ghi rõ mọi chương trình tự click **hoặc giúp giải game** (ví dụ board analyser) đều là gian lận, nên chế độ chỉ gợi ý, bạn tự bấm vẫn vi phạm; game master có toàn quyền xử lý theo quy định của họ. Extension không có cơ chế ẩn/né anti-cheat. Dùng nó đồng nghĩa với nguy cơ mất tài khoản; việc đăng xuất cũng không làm cách dùng này trở thành được phép hoặc an toàn. Không dùng trong PvP/Arena/giải đấu.
 
 ## Cài vào Chrome
 
@@ -24,11 +24,12 @@ Không cần `npm install` và không có bước build.
 ## Dùng
 
 - Chọn độ khó No Guessing trên game.
-- Bấm **PHÁ ĐẢO**. Extension sẽ tự bấm đúng ô mở đầu được game đánh dấu, sau đó chỉ mở các ô được chứng minh là an toàn.
-- Bấm **TẠM DỪNG** hoặc `Alt+S` để dừng. `Alt+S` cũng có thể bắt đầu.
-- Thanh **Độ trễ mỗi nước** điều chỉnh tốc độ. Mặc định `110 ms`; tăng lên nếu mạng chậm hoặc server bỏ qua thao tác.
+- Bấm **BẬT GỢI Ý** hoặc `Alt+S`. Lựa chọn bật/tắt được nhớ cho các lần sau.
+- Ô cần bấm được viền xanh nhấp nháy. Bạn tự bấm; khi bàn thay đổi, extension tính lại và chuyển viền sang ô an toàn kế tiếp, ưu tiên ô gần ô vừa gợi ý.
+- Viền vàng nghĩa là ô đó đang cắm cờ nhưng chắc chắn an toàn: gỡ cờ rồi mở.
+- Bấm **TẮT GỢI Ý** hoặc `Alt+S` để ẩn viền.
 
-Mỗi bàn phải được bật thủ công. Solver tự dừng nếu đổi/reset bàn, rời No Guessing, gặp skin không đọc được, phát hiện trạng thái mâu thuẫn, hoặc không còn nước logic chắc chắn. Nó không đoán xác suất trong No Guessing.
+Extension không gợi ý khi rời No Guessing, gặp skin không đọc được, phát hiện trạng thái mâu thuẫn hoặc không còn nước logic chắc chắn. Nó không đoán xác suất. Trong lúc bạn đang giữ chuột, nó tạm không đọc bàn để tránh nhầm ô đang bị nhấn thành ô đã mở.
 
 ## Skin hỗ trợ
 
@@ -43,14 +44,14 @@ npm run check
 
 Các file chính:
 
-- `src/adapter.js`: đọc DOM và gửi thao tác chuột theo event flow của site.
+- `src/adapter.js`: chỉ đọc DOM của bàn cờ, không phát sự kiện nào vào trang.
 - `src/solver.js`: solver thuần, không phụ thuộc DOM.
-- `src/content.js`: state machine và panel điều khiển Shadow DOM.
+- `src/content.js`: theo dõi bàn, chọn ô gợi ý, vẽ viền và panel điều khiển trong Shadow DOM.
 
 ## Quyền extension
 
 - Chỉ chạy trên `https://minesweeper.online/*`.
-- `storage`: lưu độ trễ và trạng thái thu gọn của panel.
+- `storage`: lưu trạng thái bật gợi ý và thu gọn panel.
 - Không có code tải từ xa, không đọc lịch sử, cookie, mật khẩu hoặc tab khác.
 
 Tham khảo: [Gameplay / No Guessing](https://minesweeper.online/help/gameplay) và [Website rules](https://minesweeper.online/help/website-rules).

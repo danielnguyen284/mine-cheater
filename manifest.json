@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Mine Cheater — No Guessing Solver",
-  "version": "0.1.0",
-  "description": "Trợ lý logic và tự động mở các ô an toàn trong No Guessing mode trên minesweeper.online.",
+  "name": "Mine Cheater - No Guessing Hints",
+  "version": "0.2.0",
+  "description": "Gợi ý ô an toàn tiếp theo trong No Guessing mode trên minesweeper.online; người chơi tự bấm.",
   "permissions": [
     "storage"
   ],

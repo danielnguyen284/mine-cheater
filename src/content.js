@@ -13,8 +13,14 @@
   }
 
   const SETTINGS_KEY = 'mineCheaterSettings';
-  const DEFAULT_SETTINGS = { delay: 110, collapsed: false };
-  const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+  const DEFAULT_SETTINGS = { hints: false, collapsed: false };
+  const SOLVER_OPTIONS = Object.freeze({
+    maxCspMs: 320,
+    maxCspNodes: 300000,
+    maxCspVariables: 60,
+  });
+  // Board re-renders arrive as bursts of class mutations; read once they settle.
+  const REFRESH_DELAY_MS = 50;
 
   function extensionStorage() {
     try {
@@ -31,9 +37,8 @@
     try {
       const result = await storage.get(SETTINGS_KEY);
       const saved = result?.[SETTINGS_KEY] || {};
-      const numericDelay = Number(saved.delay);
       return {
-        delay: Number.isFinite(numericDelay) ? Math.min(650, Math.max(60, Math.round(numericDelay / 10) * 10)) : DEFAULT_SETTINGS.delay,
+        hints: saved.hints === true,
         collapsed: saved.collapsed === true,
       };
     } catch {
@@ -212,34 +217,25 @@
         .stat-value { display: block; color: #f5fff8; font: 720 15px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
         .stat-label { display: block; margin-top: 4px; color: #789083; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 
-        .actions { display: grid; grid-template-columns: 1fr 82px; gap: 8px; }
         button { font-family: inherit; }
 
-        .primary, .secondary {
+        .primary {
+          width: 100%;
           min-height: 42px;
+          color: #092416;
+          background: linear-gradient(135deg, #69efa0, #35c977);
+          border: 1px solid rgba(155,255,195,.42);
           border-radius: 11px;
+          box-shadow: 0 8px 22px rgba(36,173,104,.18);
           font-size: 12px;
           font-weight: 760;
           cursor: pointer;
           transition: transform .12s ease, filter .12s ease, opacity .12s ease;
         }
 
-        .primary {
-          color: #092416;
-          background: linear-gradient(135deg, #69efa0, #35c977);
-          border: 1px solid rgba(155,255,195,.42);
-          box-shadow: 0 8px 22px rgba(36,173,104,.18);
-        }
-
-        .secondary { color: #c7d8ce; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09); }
-        .primary:hover, .secondary:hover { filter: brightness(1.07); }
-        .primary:active, .secondary:active { transform: translateY(1px); }
-        button:disabled { cursor: default; filter: none; opacity: .42; }
-
-        .speed { margin-top: 14px; }
-        .speed-head { display: flex; justify-content: space-between; margin-bottom: 7px; color: var(--mc-muted); font-size: 10px; }
-        .speed-value { color: #cfe6d8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-        input[type="range"] { width: 100%; height: 4px; margin: 0; accent-color: var(--mc-green); cursor: pointer; }
+        .primary.on { color: #c7d8ce; background: rgba(255,255,255,.045); border-color: rgba(255,255,255,.09); box-shadow: none; }
+        .primary:hover { filter: brightness(1.07); }
+        .primary:active { transform: translateY(1px); }
 
         .warning {
           margin-top: 13px;
@@ -251,16 +247,35 @@
         }
         .warning b { color: var(--mc-amber); font-weight: 700; }
 
+        .hint {
+          position: fixed;
+          z-index: 2147483645;
+          display: none;
+          pointer-events: none;
+          border: 3px solid var(--mc-green);
+          border-radius: 6px;
+          box-shadow: 0 0 0 2px rgba(9,36,22,.55), 0 0 14px rgba(78,225,139,.75);
+          animation: hint-pulse 1s ease-in-out infinite;
+        }
+        .hint.visible { display: block; }
+        .hint.unflag { border-color: var(--mc-amber); box-shadow: 0 0 0 2px rgba(40,28,4,.55), 0 0 14px rgba(246,198,91,.75); }
+
+        @keyframes hint-pulse {
+          50% { opacity: .55; }
+        }
+
         @media (max-width: 560px) {
           .panel { right: 10px; bottom: 10px; width: min(310px, calc(100vw - 20px)); }
         }
       </style>
 
+      <div class="hint" aria-hidden="true"></div>
+
       <section class="panel" aria-label="Mine Cheater controls">
         <header class="header">
           <div class="mark" aria-hidden="true">M·</div>
           <div class="title-wrap">
-            <div class="eyebrow">logic autopilot</div>
+            <div class="eyebrow">logic hints</div>
             <div class="title">Mine Cheater</div>
           </div>
           <button class="collapse" type="button" aria-label="Thu gọn">
@@ -277,22 +292,14 @@
           <p class="status" role="status" aria-live="polite">Mở một bàn No Guessing để bắt đầu.</p>
 
           <div class="stats" aria-label="Thống kê">
-            <div class="stat"><span class="stat-value moves">0</span><span class="stat-label">lượt mở</span></div>
+            <div class="stat"><span class="stat-value safe">0</span><span class="stat-label">ô an toàn</span></div>
             <div class="stat"><span class="stat-value opened">0</span><span class="stat-label">đã mở</span></div>
             <div class="stat"><span class="stat-value mines">0</span><span class="stat-label">mìn suy ra</span></div>
           </div>
 
-          <div class="actions">
-            <button class="primary" type="button">PHÁ ĐẢO</button>
-            <button class="secondary" type="button" disabled>TẠM DỪNG</button>
-          </div>
+          <button class="primary" type="button">BẬT GỢI Ý</button>
 
-          <div class="speed">
-            <div class="speed-head"><span>Độ trễ mỗi nước</span><span class="speed-value">110 ms</span></div>
-            <input class="speed-input" type="range" min="60" max="650" step="10" value="110" aria-label="Độ trễ mỗi nước">
-          </div>
-
-          <div class="warning"><b>Lưu ý:</b> site cấm solver/auto-click và có thể khóa tài khoản. Extension không che giấu thao tác — nên dùng khi đã chấp nhận rủi ro.</div>
+          <div class="warning"><b>Lưu ý:</b> luật site cấm cả board analyser, kể cả khi bạn tự bấm. Dùng gợi ý vẫn có thể bị khóa tài khoản.</div>
         </div>
       </section>
     `;
@@ -310,19 +317,16 @@
 
       this.panel = this.shadow.querySelector('.panel');
       this.primary = this.shadow.querySelector('.primary');
-      this.secondary = this.shadow.querySelector('.secondary');
       this.statusNode = this.shadow.querySelector('.status');
       this.modeNode = this.shadow.querySelector('.mode');
       this.dot = this.shadow.querySelector('.mode-dot');
-      this.movesNode = this.shadow.querySelector('.moves');
+      this.safeNode = this.shadow.querySelector('.safe');
       this.openedNode = this.shadow.querySelector('.opened');
       this.minesNode = this.shadow.querySelector('.mines');
-      this.speedInput = this.shadow.querySelector('.speed-input');
-      this.speedValue = this.shadow.querySelector('.speed-value');
+      this.hintNode = this.shadow.querySelector('.hint');
+      this.hintTarget = null;
 
       this.panel.classList.toggle('collapsed', Boolean(settings.collapsed));
-      this.speedInput.value = String(settings.delay);
-      this.speedValue.textContent = `${settings.delay} ms`;
 
       this.shadow.querySelector('.collapse').addEventListener('click', () => {
         settings.collapsed = !settings.collapsed;
@@ -330,21 +334,16 @@
         saveSettings(settings);
       });
 
-      this.speedInput.addEventListener('input', () => {
-        settings.delay = Number(this.speedInput.value);
-        this.speedValue.textContent = `${settings.delay} ms`;
-      });
-
-      this.speedInput.addEventListener('change', () => saveSettings(settings));
+      const reposition = () => this.placeHint();
+      window.addEventListener('scroll', reposition, { capture: true, passive: true });
+      window.addEventListener('resize', reposition, { passive: true });
     }
 
-    onStart(handler) { this.primary.addEventListener('click', handler); }
-    onPause(handler) { this.secondary.addEventListener('click', handler); }
+    onToggle(handler) { this.primary.addEventListener('click', handler); }
 
-    setRunning(running) {
-      this.primary.disabled = running;
-      this.secondary.disabled = !running;
-      this.primary.textContent = running ? 'ĐANG GIẢI…' : 'PHÁ ĐẢO';
+    setEnabled(enabled) {
+      this.primary.classList.toggle('on', enabled);
+      this.primary.textContent = enabled ? 'TẮT GỢI Ý' : 'BẬT GỢI Ý';
     }
 
     setMode(label, kind = 'idle') {
@@ -353,14 +352,42 @@
     }
 
     setStatus(message, kind = 'idle') {
-      this.statusNode.textContent = message;
+      // Refreshes run on every board tick; avoid re-announcing unchanged text.
+      if (this.statusNode.textContent !== message) this.statusNode.textContent = message;
       this.dot.className = `mode-dot ${kind}`;
     }
 
-    setStats({ moves, opened, mines }) {
-      if (moves !== undefined) this.movesNode.textContent = String(moves);
+    setStats({ safe, opened, mines }) {
+      if (safe !== undefined) this.safeNode.textContent = String(safe);
       if (opened !== undefined) this.openedNode.textContent = String(opened);
       if (mines !== undefined) this.minesNode.textContent = String(mines);
+    }
+
+    showHint(element, kind) {
+      this.hintTarget = element;
+      this.hintNode.classList.toggle('unflag', kind === 'unflag');
+      this.placeHint();
+    }
+
+    hideHint() {
+      this.hintTarget = null;
+      this.hintNode.classList.remove('visible');
+    }
+
+    placeHint() {
+      const target = this.hintTarget;
+      const rect = target?.isConnected ? target.getBoundingClientRect() : null;
+      if (!rect || !rect.width || !rect.height) {
+        this.hintNode.classList.remove('visible');
+        return;
+      }
+      Object.assign(this.hintNode.style, {
+        left: `${rect.left - 2}px`,
+        top: `${rect.top - 2}px`,
+        width: `${rect.width + 4}px`,
+        height: `${rect.height + 4}px`,
+      });
+      this.hintNode.classList.add('visible');
     }
   }
 
@@ -393,337 +420,187 @@
       || document.querySelector(`#cell_${cell.x}_${cell.y}`);
   }
 
-  async function waitForChange(snapshot, timeoutMs = 4500) {
-    const before = snapshotFingerprint(snapshot);
-    if (typeof Adapter.waitForChange === 'function') {
-      return Adapter.waitForChange(snapshot.root, before, timeoutMs);
-    }
-
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (changed) => {
-        if (settled) return;
-        settled = true;
-        observer.disconnect();
-        clearTimeout(timer);
-        resolve(changed);
-      };
-      const check = () => {
-        try {
-          const next = readSnapshot();
-          if (next && snapshotFingerprint(next) !== before) finish(true);
-        } catch {
-          finish(false);
-        }
-      };
-      const observer = new MutationObserver(check);
-      observer.observe(snapshot.root || document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
-      const timer = setTimeout(() => finish(false), timeoutMs);
-      check();
-    });
+  function distance(left, right) {
+    return Math.max(Math.abs(left.x - right.x), Math.abs(left.y - right.y));
   }
 
-  class Controller {
+  /**
+   * Prefer covered cells (a flagged safe cell only needs its flag removed) and
+   * stay close to the previous hint so the mouse does not jump across the board.
+   */
+  function pickNextCell(snapshot, safeMoves, previous) {
+    const cells = safeMoves.map((move) => findSnapshotCell(snapshot, move)).filter(Boolean);
+    const covered = cells.filter((cell) => cell.state === 'covered');
+    const pool = covered.length ? covered : cells;
+    if (!pool.length) return null;
+    if (!previous) return pool[0];
+    return pool.reduce((best, cell) => (distance(cell, previous) < distance(best, previous) ? cell : best));
+  }
+
+  class HintController {
     constructor(panel, settings) {
       this.panel = panel;
       this.settings = settings;
-      this.running = false;
-      this.token = 0;
-      this.moves = 0;
-      this.lastRoot = null;
-      this.lastOpened = 0;
-      this.startWaits = 0;
-      this.stallChecks = 0;
-      this.noChangeRetries = new Map();
-      this.scanTimer = null;
+      this.refreshTimer = null;
+      this.pointerDown = false;
+      this.cachedFingerprint = null;
+      this.cachedResult = null;
+      this.lastHint = null;
 
-      panel.onStart(() => this.start());
-      panel.onPause(() => this.pause('Đã tạm dừng.'));
+      panel.setEnabled(settings.hints);
+      panel.onToggle(() => this.toggle());
       document.addEventListener('keydown', (event) => {
         const target = event.target;
         const isEditing = target instanceof HTMLElement
           && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
         if (!event.repeat && !isEditing && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === 'KeyS') {
           event.preventDefault();
-          this.running ? this.pause('Đã tạm dừng bằng Alt+S.') : this.start();
+          this.toggle();
         }
       });
 
+      // While a button is held the site may draw the pressed cell as opened;
+      // reading that frame would feed the solver a clue that does not exist.
+      document.addEventListener('mousedown', () => { this.pointerDown = true; }, true);
+      document.addEventListener('mouseup', () => {
+        this.pointerDown = false;
+        this.scheduleRefresh();
+      }, true);
+      window.addEventListener('blur', () => { this.pointerDown = false; });
+
       this.observePage();
-      this.refreshIdleState();
+      this.refresh();
+    }
+
+    toggle() {
+      this.settings.hints = !this.settings.hints;
+      this.panel.setEnabled(this.settings.hints);
+      saveSettings(this.settings);
+      this.refresh();
     }
 
     observePage() {
-      const observer = new MutationObserver(() => {
-        clearTimeout(this.scanTimer);
-        this.scanTimer = setTimeout(() => {
-          if (!this.running) this.refreshIdleState();
-        }, 120);
+      const observer = new MutationObserver(() => this.scheduleRefresh());
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class'],
       });
-      observer.observe(document.documentElement, { subtree: true, childList: true });
     }
 
-    refreshIdleState() {
-      let snapshot;
-      try {
-        snapshot = readSnapshot();
-      } catch {
-        return;
-      }
-      if (!snapshot?.cells?.length) {
-        this.panel.setMode('Chưa có bàn', 'idle');
-        return;
-      }
-      this.panel.setStats({ opened: snapshot.openCount || 0 });
-      if (snapshot.unsupportedReason) {
-        this.panel.setMode('Không hỗ trợ', 'warning');
-        this.panel.setStatus(snapshot.unsupportedReason, 'warning');
-      } else if (snapshot.isNoGuessing) {
-        this.panel.setMode('No Guessing', 'ready');
-        this.panel.setStatus('Sẵn sàng. Bấm PHÁ ĐẢO — ô mở đầu sẽ được chọn đúng marker của game.', 'ready');
+    scheduleRefresh() {
+      if (this.refreshTimer !== null) return;
+      this.refreshTimer = setTimeout(() => {
+        this.refreshTimer = null;
+        if (!this.pointerDown) this.refresh();
+      }, REFRESH_DELAY_MS);
+    }
+
+    idle(mode, message, kind) {
+      this.panel.hideHint();
+      this.panel.setStats({ safe: 0, mines: 0 });
+      this.panel.setMode(mode, kind);
+      this.panel.setStatus(message, kind);
+    }
+
+    hint(element, cell, kind) {
+      this.lastHint = { x: cell.x, y: cell.y };
+      this.panel.showHint(element, kind);
+      this.panel.setMode('No Guessing', 'running');
+      if (kind === 'start') {
+        this.panel.setStatus(`Bấm ô bắt đầu (${cell.x}, ${cell.y}) mà game đã đánh dấu.`, 'running');
+      } else if (kind === 'unflag') {
+        this.panel.setStatus(`Ô (${cell.x}, ${cell.y}) đang cắm cờ nhưng an toàn: gỡ cờ rồi mở.`, 'warning');
       } else {
-        this.panel.setMode('Sai chế độ', 'warning');
-        this.panel.setStatus('Chuyển sang No Guessing mode rồi thử lại.', 'warning');
+        this.panel.setStatus(`Mở ô (${cell.x}, ${cell.y}): chắc chắn an toàn.`, 'running');
       }
     }
 
-    start() {
-      if (this.running) return;
+    refresh() {
       let snapshot;
       try {
         snapshot = readSnapshot();
       } catch (error) {
-        this.panel.setStatus(`Không đọc được bàn: ${error.message}`, 'error');
+        this.idle('Lỗi đọc bàn', `Không đọc được bàn: ${error.message}`, 'error');
         return;
       }
 
       if (!snapshot?.cells?.length) {
-        this.panel.setStatus('Chưa tìm thấy bàn cờ trên trang.', 'warning');
+        this.idle('Chưa có bàn', 'Mở một bàn No Guessing để bắt đầu.', 'idle');
         return;
       }
+      this.panel.setStats({ opened: snapshot.openCount || 0 });
       if (snapshot.unsupportedReason) {
-        this.panel.setStatus(snapshot.unsupportedReason, 'warning');
+        this.idle('Không hỗ trợ', snapshot.unsupportedReason, 'warning');
         return;
       }
       if (!snapshot.isNoGuessing) {
-        this.panel.setStatus('Extension chỉ chạy ở No Guessing single-player.', 'warning');
+        this.idle('Sai chế độ', 'Chuyển sang No Guessing mode để xem gợi ý.', 'warning');
+        return;
+      }
+      if (snapshot.outcome === 'won') {
+        this.idle('Hoàn tất', 'Đã thắng ván này.', 'success');
+        return;
+      }
+      if (snapshot.outcome === 'lost') {
+        this.idle('Đã thua', 'Ván đã thua.', 'error');
+        return;
+      }
+      if (!this.settings.hints) {
+        this.idle('No Guessing', 'Bấm BẬT GỢI Ý hoặc Alt+S để hiện ô an toàn tiếp theo.', 'ready');
         return;
       }
 
-      this.running = true;
-      this.token += 1;
-      this.moves = 0;
-      this.lastRoot = snapshot.root;
-      this.lastOpened = snapshot.openCount || 0;
-      this.startWaits = 0;
-      this.stallChecks = 0;
-      this.noChangeRetries.clear();
-      this.panel.setRunning(true);
-      this.panel.setMode('No Guessing', 'running');
-      this.panel.setStatus('Đang đọc các ràng buộc logic…', 'running');
-      this.panel.setStats({ moves: 0, opened: snapshot.openCount || 0, mines: 0 });
-      const token = this.token;
-      this.runLoop(token).catch((error) => {
-        if (this.isCurrent(token)) {
-          this.pause(`Solver gặp lỗi: ${error?.message || String(error)}`, 'error');
-        }
-        console.error('[Mine Cheater] Controller error', error);
-      });
-    }
-
-    pause(message, kind = 'warning') {
-      this.running = false;
-      this.token += 1;
-      this.panel.setRunning(false);
-      this.panel.setStatus(message, kind);
-      if (kind === 'success') this.panel.setMode('Hoàn tất', 'success');
-    }
-
-    isCurrent(token) {
-      return this.running && token === this.token;
-    }
-
-    async runLoop(token) {
-      while (this.isCurrent(token)) {
-        let snapshot;
-        try {
-          snapshot = readSnapshot();
-        } catch (error) {
-          this.pause(`Lỗi đọc bàn: ${error.message}`, 'error');
+      if (!snapshot.openCount) {
+        const startCell = snapshot.startCell;
+        const element = startCell && boardElement(snapshot, startCell);
+        if (!element) {
+          this.idle('No Guessing', 'Đang chờ game đánh dấu ô mở đầu…', 'running');
           return;
         }
-
-        if (!snapshot?.cells?.length) {
-          this.pause('Bàn cờ đã rời khỏi trang.', 'warning');
-          return;
-        }
-        if (snapshot.unsupportedReason) {
-          this.pause(snapshot.unsupportedReason, 'warning');
-          return;
-        }
-        if (!snapshot.isNoGuessing) {
-          this.pause('Đã rời No Guessing mode.', 'warning');
-          return;
-        }
-
-        const opened = snapshot.openCount || 0;
-        this.panel.setStats({ moves: this.moves, opened });
-
-        if (snapshot.outcome === 'won') {
-          this.pause(`Xong — đã phá đảo sau ${this.moves} lượt mở tự động.`, 'success');
-          return;
-        }
-        if (snapshot.outcome === 'lost') {
-          this.pause('Ván đã thua; solver đã dừng.', 'error');
-          return;
-        }
-
-        if (this.lastRoot && snapshot.root !== this.lastRoot && this.moves > 0) {
-          this.pause('Phát hiện bàn mới. Bấm PHÁ ĐẢO để chạy ván này.', 'warning');
-          return;
-        }
-        if (this.lastOpened > 0 && opened === 0) {
-          this.pause('Bàn vừa được reset. Bấm PHÁ ĐẢO để chạy lại.', 'warning');
-          return;
-        }
-        this.lastRoot = snapshot.root;
-        this.lastOpened = Math.max(this.lastOpened, opened);
-
-        if (opened === 0) {
-          const startCell = snapshot.startCell;
-          if (!startCell) {
-            this.startWaits += 1;
-            if (this.startWaits > 70) {
-              this.pause('Không thấy ô mở đầu .start. Solver không đoán bừa trong No Guessing.', 'error');
-              return;
-            }
-            this.panel.setStatus('Đang chờ game đánh dấu ô mở đầu bắt buộc…', 'running');
-            await sleep(180);
-            continue;
-          }
-
-          const element = boardElement(snapshot, startCell);
-          if (!element) {
-            this.startWaits += 1;
-            if (this.startWaits > 70) {
-              this.pause('Marker mở đầu đã có nhưng không lấy được cell DOM.', 'error');
-              return;
-            }
-            await sleep(120);
-            continue;
-          }
-          this.panel.setStatus(`Mở đúng ô bắt đầu (${startCell.x}, ${startCell.y})…`, 'running');
-          const startKey = `start:${cellKey(startCell)}`;
-          const clicked = Adapter.primaryClick(element);
-          if (clicked) {
-            this.moves += 1;
-            this.panel.setStats({ moves: this.moves });
-          }
-          const changed = clicked && await waitForChange(snapshot);
-          if (!changed) {
-            const retries = (this.noChangeRetries.get(startKey) || 0) + 1;
-            this.noChangeRetries.set(startKey, retries);
-            if (retries >= 2) {
-              this.pause('Site không nhận thao tác mở đầu; đã dừng thay vì click lặp vô hạn.', 'error');
-              return;
-            }
-          } else {
-            this.noChangeRetries.delete(startKey);
-          }
-          await sleep(this.settings.delay);
-          continue;
-        }
-
-        const result = Solver.analyze(snapshot, {
-          maxExactMillis: 320,
-          maxExactNodes: 300000,
-          maxCspVariables: 60,
-        });
-        const safeMoves = result.safe || result.safeCells || [];
-        const mineMoves = result.mines || result.mineCells || [];
-        this.panel.setStats({ mines: mineMoves.length });
-
-        if (result.status === 'contradiction' || result.contradiction) {
-          await sleep(180);
-          if (!this.isCurrent(token)) return;
-          const confirmation = Solver.analyze(readSnapshot(), {
-            maxExactMillis: 320,
-            maxExactNodes: 300000,
-            maxCspVariables: 60,
-          });
-          if (confirmation.status === 'contradiction' || confirmation.contradiction) {
-            this.pause('DOM đang mâu thuẫn hoặc skin không đọc được; đã dừng để không bấm nhầm.', 'error');
-            return;
-          }
-          continue;
-        }
-
-        const target = safeMoves.map((move) => findSnapshotCell(snapshot, move)).find(Boolean);
-        if (!target) {
-          this.stallChecks += 1;
-          if (this.stallChecks <= 3) {
-            this.panel.setStatus('Chưa thấy nước chắc chắn; đang chạy suy luận sâu lại…', 'running');
-            await sleep(220);
-            continue;
-          }
-          this.pause('Solver bị kẹt dù đây là No Guessing. Không dùng xác suất, nên đã dừng an toàn.', 'warning');
-          return;
-        }
-        this.stallChecks = 0;
-
-        const targetElement = boardElement(snapshot, target);
-        if (!targetElement || !targetElement.isConnected) {
-          await sleep(80);
-          continue;
-        }
-
-        if (target.state === 'flagged') {
-          this.panel.setStatus(`Gỡ cờ ở ô an toàn (${target.x}, ${target.y})…`, 'running');
-          const unflagKey = `unflag:${cellKey(target)}`;
-          const clicked = Adapter.secondaryClick(targetElement);
-          const changed = clicked && await waitForChange(snapshot);
-          if (!changed) {
-            const retries = (this.noChangeRetries.get(unflagKey) || 0) + 1;
-            this.noChangeRetries.set(unflagKey, retries);
-            if (retries >= 2) {
-              this.pause(`Không gỡ được cờ tại (${target.x}, ${target.y}); đã dừng.`, 'error');
-              return;
-            }
-          } else {
-            this.noChangeRetries.delete(unflagKey);
-          }
-          await sleep(this.settings.delay);
-          continue;
-        }
-
-        const targetKey = cellKey(target);
-        this.panel.setStatus(`Ô (${target.x}, ${target.y}) chắc chắn an toàn — đang mở…`, 'running');
-        const clicked = Adapter.primaryClick(targetElement);
-        if (clicked) {
-          this.moves += 1;
-          this.panel.setStats({ moves: this.moves });
-        }
-        const changed = clicked && await waitForChange(snapshot);
-
-        if (!changed) {
-          const retries = (this.noChangeRetries.get(targetKey) || 0) + 1;
-          this.noChangeRetries.set(targetKey, retries);
-          if (retries >= 2) {
-            this.pause(`Site không nhận thao tác tại (${target.x}, ${target.y}); đã dừng để tránh spam click.`, 'error');
-            return;
-          }
-        } else {
-          this.noChangeRetries.delete(targetKey);
-        }
-
-        await sleep(this.settings.delay);
+        this.panel.setStats({ safe: 1, mines: 0 });
+        this.hint(element, startCell, 'start');
+        return;
       }
+
+      const fingerprint = snapshotFingerprint(snapshot);
+      if (fingerprint !== this.cachedFingerprint) {
+        try {
+          this.cachedResult = Solver.analyze(snapshot, SOLVER_OPTIONS);
+        } catch (error) {
+          this.cachedResult = null;
+          this.cachedFingerprint = null;
+          this.idle('Lỗi solver', `Solver gặp lỗi: ${error?.message || String(error)}`, 'error');
+          return;
+        }
+        this.cachedFingerprint = fingerprint;
+      }
+
+      const result = this.cachedResult;
+      if (result.status === 'contradiction' || result.contradiction) {
+        this.idle('No Guessing', 'Bàn đang mâu thuẫn hoặc skin không đọc được, nên chưa gợi ý.', 'error');
+        return;
+      }
+
+      const safeMoves = result.safe || result.safeCells || [];
+      const mineMoves = result.mines || result.mineCells || [];
+      const target = pickNextCell(snapshot, safeMoves, this.lastHint);
+      const element = target && boardElement(snapshot, target);
+      if (!element) {
+        this.idle('No Guessing', 'Không có nước chắc chắn. Solver không đoán xác suất.', 'warning');
+        this.panel.setStats({ mines: mineMoves.length });
+        return;
+      }
+
+      this.panel.setStats({ safe: safeMoves.length, mines: mineMoves.length });
+      this.hint(element, target, target.state === 'flagged' ? 'unflag' : 'open');
     }
   }
 
   loadSettings().then((settings) => {
     if (document.getElementById('mine-cheater-extension-root')) return;
     const panel = new Panel(settings);
-    new Controller(panel, settings);
+    new HintController(panel, settings);
   });
 })();

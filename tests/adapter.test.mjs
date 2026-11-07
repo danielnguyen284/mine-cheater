@@ -5,19 +5,6 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const Adapter = require('../src/adapter.js');
 
-class FakeMouseEvent {
-  constructor(type, options = {}) {
-    this.type = type;
-    Object.assign(this, options);
-    this.which = 0;
-    this.defaultPrevented = false;
-  }
-
-  preventDefault() {
-    this.defaultPrevented = true;
-  }
-}
-
 class FakeElement {
   constructor(attributes = {}) {
     this.attributes = Object.assign({}, attributes);
@@ -29,8 +16,6 @@ class FakeElement {
     this.parentElement = null;
     this.ownerDocument = null;
     this.isConnected = true;
-    this.events = [];
-    this.onDispatch = null;
   }
 
   get classList() {
@@ -85,23 +70,12 @@ class FakeElement {
     }
     return null;
   }
-
-  getBoundingClientRect() {
-    return { left: 10, top: 20, width: 24, height: 24 };
-  }
-
-  dispatchEvent(event) {
-    this.events.push(event);
-    if (this.onDispatch) this.onDispatch(event, this);
-    return !event.defaultPrevented;
-  }
 }
 
 class FakeDocument {
   constructor({ cells = [], noGuessing = false, pathname = '/game/1', counter = ['0', '0', '0'], face = null, skin = 'hd' } = {}) {
     this.nodeType = 9;
     this.location = { pathname };
-    this.defaultView = { MouseEvent: FakeMouseEvent };
     this.documentElement = new FakeElement({ id: 'html' });
     this.documentElement.ownerDocument = this;
     this.board = new FakeElement({ id: 'CellsBlock' });
@@ -156,11 +130,14 @@ function cell(x, y, className) {
   return new FakeElement({ 'data-x': x, 'data-y': y, class: `cell size24 ${className}` });
 }
 
-test('installs a frozen browser global and CommonJS API', () => {
+test('installs a frozen, read-only browser global and CommonJS API', () => {
   assert.equal(globalThis.MineCheaterAdapter, Adapter);
   assert.ok(Object.isFrozen(Adapter));
-  for (const method of ['readSnapshot', 'fingerprint', 'primaryClick', 'secondaryClick', 'waitForChange', 'findCellElement']) {
+  for (const method of ['readSnapshot', 'fingerprint', 'findCellElement']) {
     assert.equal(typeof Adapter[method], 'function');
+  }
+  for (const method of ['primaryClick', 'secondaryClick', 'secondaryUnflag', 'waitForChange']) {
+    assert.equal(Adapter[method], undefined, 'the adapter must stay read-only');
   }
 });
 
@@ -268,43 +245,4 @@ test('fingerprint changes for durable board state, outcome, and forced-start cha
   const opened = Adapter.fingerprint(Adapter.readSnapshot(doc));
   assert.notEqual(startMarked, before);
   assert.notEqual(opened, startMarked);
-});
-
-test('primaryClick emits the mousedown/up pair with legacy which values', () => {
-  const target = cell(0, 0, 'hd_closed');
-  new FakeDocument({ cells: [target] });
-  assert.equal(Adapter.primaryClick(target), true);
-  assert.deepEqual(target.events.map((event) => [event.type, event.button, event.buttons, event.which]), [
-    ['mousedown', 0, 1, 1],
-    ['mouseup', 0, 0, 1]
-  ]);
-});
-
-test('secondaryClick uses contextmenu only when right down/up did not change the cell', () => {
-  const desktop = cell(0, 0, 'hd_closed hd_flag');
-  new FakeDocument({ cells: [desktop] });
-  desktop.onDispatch = (event, element) => {
-    if (event.type === 'mouseup') element.className = 'cell size24 hd_closed';
-  };
-  assert.equal(Adapter.secondaryClick(desktop), true);
-  assert.deepEqual(desktop.events.map((event) => event.type), ['mousedown', 'mouseup']);
-
-  const quickAction = cell(0, 0, 'hd_closed hd_flag');
-  new FakeDocument({ cells: [quickAction] });
-  assert.equal(Adapter.secondaryUnflag(quickAction), true);
-  assert.deepEqual(quickAction.events.map((event) => event.type), ['mousedown', 'mouseup', 'contextmenu']);
-  assert.deepEqual(quickAction.events.map((event) => event.which), [3, 3, 3]);
-});
-
-test('waitForChange resolves true after a cell class mutation and false on timeout', async () => {
-  const target = cell(0, 0, 'hd_closed');
-  const doc = new FakeDocument({ cells: [target] });
-  const before = Adapter.fingerprint(Adapter.readSnapshot(doc));
-  setTimeout(() => {
-    target.className = 'cell size24 hd_opened hd_type0';
-  }, 5);
-  assert.equal(await Adapter.waitForChange(doc.board, before, 150), true);
-
-  const unchanged = Adapter.fingerprint(Adapter.readSnapshot(doc));
-  assert.equal(await Adapter.waitForChange(doc.board, unchanged, 5), false);
 });
